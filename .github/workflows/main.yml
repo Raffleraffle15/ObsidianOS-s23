@@ -1,0 +1,73 @@
+name: ObsidianOS S23 One-Click Builder
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1" # Weekly Monday build
+
+env:
+  DEVICE: dm1q
+  ROM_NAME: ObsidianOS-S23
+  MANIFEST: https://github.com/LineageOS/android.git
+  BRANCH: lineage-21.0
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+    - name: Free Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+        sudo apt clean
+        df -h
+
+    - name: Install Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git repo curl zip unzip python3 openjdk-17-jdk \
+        build-essential bc bison flex gperf g++-multilib gcc-multilib \
+        libc6-dev-i386 libncurses5 libssl-dev
+
+    - name: Initialize Source
+      run: |
+        repo init -u $MANIFEST -b $BRANCH
+        repo sync -j4
+
+    - name: Add Device Trees
+      run: |
+        git clone https://github.com/samsung-sm8550/android_device_samsung_dm1q device/samsung/dm1q
+        git clone https://github.com/samsung-sm8550/android_kernel_samsung_sm8550 kernel/samsung/sm8550
+        git clone https://github.com/samsung-sm8550/proprietary_vendor_samsung vendor/samsung
+
+    - name: Apply ObsidianOS Security Profile
+      run: |
+        cat <<EOF > device/samsung/dm1q/obsidian.mk
+        PRODUCT_SYSTEM_PROPERTIES += \
+          ro.adb.secure=1 \
+          persist.sys.privacy.camera=true \
+          persist.sys.privacy.mic=true \
+          persist.sys.privacy.sensors=true \
+          persist.sys.usb.config=none \
+          persist.sys.ota.autocheck=true
+
+        PRODUCT_PACKAGES += \
+          dnscrypt-proxy \
+          F-Droid \
+          Shelter \
+          Insular
+        EOF
+
+    - name: Build ROM
+      run: |
+        source build/envsetup.sh
+        lunch lineage_$DEVICE-userdebug
+        make bacon -j4
+
+    - name: Upload Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.run_number }}
+        name: ObsidianOS S23 Build
+        files: out/target/product/dm1q/*.zip
